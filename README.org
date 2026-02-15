@@ -1,0 +1,100 @@
+#+TITLE: Sextant - A Common Lisp Language Server
+#+AUTHOR: Glenn Thompson
+#+OPTIONS: toc:2
+
+* Sextant
+
+A Language Server Protocol (LSP) implementation for Common Lisp, written in Common Lisp.
+
+Sextant runs as an SBCL process that speaks LSP over stdio. It queries its own running
+Lisp image for symbol information, giving you hover docs, completions, go-to-definition,
+and signature help in any LSP-capable editor.
+
+** Features
+
+- *Hover documentation* - Symbol type, arglist, docstring (=textDocument/hover=)
+- *Completions* - Symbol name completion across all packages (=textDocument/completion=)
+- *Go to definition* - Jump to source via SBCL introspection (=textDocument/definition=)
+- *Signature help* - Function arglist display (=textDocument/signatureHelp=)
+- *Zero external deps at runtime* - Queries the live SBCL image directly
+- *No Swank/Slynk required* - Self-contained LSP server
+
+** Building
+
+#+begin_src bash
+cd sextant
+make
+#+end_src
+
+This produces a =sextant= executable (~50MB compressed).
+
+** Neovim Setup
+
+Add to =~/.config/nvim/lua/plugins/sextant.lua=:
+
+#+begin_src lua
+return {
+  {
+    "neovim/nvim-lspconfig",
+    opts = function(_, opts)
+      local configs = require("lspconfig.configs")
+      if not configs.sextant then
+        configs.sextant = {
+          default_config = {
+            cmd = { "/home/glenn/SourceCode/sextant/sextant" },
+            filetypes = { "lisp" },
+            root_dir = function(fname)
+              return require("lspconfig.util").find_git_ancestor(fname)
+                or vim.fn.getcwd()
+            end,
+            settings = {},
+          },
+        }
+      end
+      require("lspconfig").sextant.setup({})
+    end,
+  },
+}
+#+end_src
+
+** Architecture
+
+#+begin_src text
+sextant/
+  sextant.asd            ; ASDF system definition
+  Makefile               ; Build script
+  src/
+    package.lisp         ; Package definition
+    json.lisp            ; Minimal JSON reader/writer (no deps)
+    transport.lisp       ; LSP JSON-RPC over stdio
+    document.lisp        ; Open file tracking, symbol-at-position
+    lisp-introspection.lisp  ; Query running SBCL for docs/completions/defs
+    handlers.lisp        ; LSP method dispatch
+    server.lisp          ; Main message loop
+    main.lisp            ; Entry point
+#+end_src
+
+** How It Works
+
+Unlike most language servers that do static analysis, Sextant queries a *live Common Lisp
+image*. When you hover over =format=, it calls =(documentation 'format 'function)= and
+=(sb-introspect:function-lambda-list 'format)= in its own SBCL process.
+
+This means:
+- All of CL's 978 standard symbols are available immediately
+- Quicklisp packages can be loaded into the server for their docs too
+- Macros, reader macros, and dynamic features Just Work
+
+** Debug Logging
+
+Set =SEXTANT_LOG= to control the log file location:
+
+#+begin_src bash
+SEXTANT_LOG=/tmp/sextant.log sextant
+#+end_src
+
+Default: =/tmp/sextant.log=
+
+** License
+
+MIT
