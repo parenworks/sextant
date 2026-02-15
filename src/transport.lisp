@@ -23,9 +23,10 @@
     (force-output *lsp-log*)))
 
 (defun read-lsp-message (&optional (stream *lsp-input*))
-  "Read one LSP message from STREAM. Returns parsed JSON alist or NIL on EOF."
+  "Read one LSP message from STREAM. Returns parsed JSON alist or NIL on EOF.
+Content-Length is in bytes, so we read bytes and decode to UTF-8."
   (let ((content-length nil))
-    ;; Read headers
+    ;; Read headers (line-by-line is fine for ASCII headers)
     (loop for line = (read-line stream nil nil)
           while line
           do (let ((trimmed (string-trim '(#\Return #\Newline #\Space) line)))
@@ -39,16 +40,29 @@
                      (setf content-length (parse-integer (aref groups 0))))))))
     (unless content-length
       (return-from read-lsp-message nil))
-    ;; Read body
-    (let ((buf (make-string content-length)))
-      (let ((n (read-sequence buf stream)))
-        (when (< n content-length)
-          (return-from read-lsp-message nil)))
-      (lsp-log "<<< ~a" buf)
-      (handler-case (json-parse buf)
-        (error (e)
-          (lsp-log "JSON parse error: ~a" e)
-          nil)))))
+    ;; Read body - Content-Length is in bytes but for JSON (mostly ASCII)
+    ;; we read chars and handle any mismatch gracefully
+    (let ((buf (make-array content-length :element-type 'character :fill-pointer 0))
+          (chars-read 0))
+      (loop while (< chars-read content-length)
+            for c = (read-char stream nil nil)
+            while c
+            do (vector-push-extend c buf)
+               ;; Count UTF-8 bytes: ASCII=1, 2-byte=2, 3-byte=3, 4-byte=4
+               (let ((code (char-code c)))
+                 (incf chars-read
+                       (cond ((<= code #x7F) 1)
+                             ((<= code #x7FF) 2)
+                             ((<= code #xFFFF) 3)
+                             (t 4)))))
+      (when (zerop (length buf))
+        (return-from read-lsp-message nil))
+      (let ((body (coerce buf 'string)))
+        (lsp-log "<<< ~a" body)
+        (handler-case (json-parse body)
+          (error (e)
+            (lsp-log "JSON parse error: ~a" e)
+            nil))))))
 
 (defun write-lsp-message (obj &optional (stream *lsp-output*))
   "Write OBJ as an LSP JSON-RPC message to STREAM."
