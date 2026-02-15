@@ -28,6 +28,31 @@ make
 
 This produces a =sextant= executable (~50MB compressed).
 
+** Emacs Setup (eglot)
+
+#+begin_src emacs-lisp
+;; Add to your init.el or config
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               '(lisp-mode . ("/path/to/sextant"))))
+
+;; Auto-start on lisp files (optional)
+(add-hook 'lisp-mode-hook 'eglot-ensure)
+#+end_src
+
+Or with =lsp-mode=:
+
+#+begin_src emacs-lisp
+(with-eval-after-load 'lsp-mode
+  (lsp-register-client
+   (make-lsp-client
+    :new-connection (lsp-stdio-connection '("/path/to/sextant"))
+    :major-modes '(lisp-mode)
+    :server-id 'sextant)))
+
+(add-hook 'lisp-mode-hook #'lsp)
+#+end_src
+
 ** Neovim Setup
 
 Add to =~/.config/nvim/lua/plugins/sextant.lua=:
@@ -41,7 +66,7 @@ return {
       if not configs.sextant then
         configs.sextant = {
           default_config = {
-            cmd = { "/home/glenn/SourceCode/sextant/sextant" },
+            cmd = { "/path/to/sextant" },
             filetypes = { "lisp" },
             root_dir = function(fname)
               return require("lspconfig.util").find_git_ancestor(fname)
@@ -55,6 +80,19 @@ return {
     end,
   },
 }
+#+end_src
+
+** Helix Setup
+
+Add to =~/.config/helix/languages.toml=:
+
+#+begin_src toml
+[[language]]
+name = "lisp"
+language-servers = ["sextant"]
+
+[language-server.sextant]
+command = "/path/to/sextant"
 #+end_src
 
 ** Architecture
