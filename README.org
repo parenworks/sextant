@@ -7,17 +7,48 @@
 A Language Server Protocol (LSP) implementation for Common Lisp, written in Common Lisp.
 
 Sextant runs as an SBCL process that speaks LSP over stdio. It queries its own running
-Lisp image for symbol information, giving you hover docs, completions, go-to-definition,
-and signature help in any LSP-capable editor.
+Lisp image for symbol information, giving you a full-featured editing experience in any
+LSP-capable editor.
 
 ** Features
 
+*** Core
 - *Hover documentation* - Symbol type, arglist, docstring (=textDocument/hover=)
 - *Completions* - Symbol name completion across all packages (=textDocument/completion=)
+- *Completion resolve* - Lazy-load documentation per completion item (=completionItem/resolve=)
 - *Go to definition* - Jump to source via SBCL introspection (=textDocument/definition=)
+- *Find references* - Who calls, binds, references, macroexpands (=textDocument/references=)
 - *Signature help* - Function arglist display (=textDocument/signatureHelp=)
+- *Diagnostics* - Compile buffer in sandbox, report errors/warnings (=textDocument/publishDiagnostics=)
+
+*** Navigation & Structure
+- *Document symbols* - Outline of all =def*= forms (=textDocument/documentSymbol=)
+- *Workspace symbols* - Search symbols across all packages (=workspace/symbol=)
+- *Call hierarchy* - Incoming calls via =sb-introspect:who-calls= (=callHierarchy/incomingCalls=)
+- *Folding ranges* - Fold top-level forms (=textDocument/foldingRange=)
+- *Selection range* - Expand/shrink selection by s-expression (=textDocument/selectionRange=)
+
+*** Editing
+- *Rename* - Rename symbol across current file (=textDocument/rename=)
+- *Formatting* - S-expression-aware indentation (=textDocument/formatting=)
+- *Code actions* - Add package prefix, export symbol, insert defpackage (=textDocument/codeAction=)
+- *Linked editing range* - Edit all occurrences simultaneously (=textDocument/linkedEditingRange=)
+
+*** Display
+- *Document highlight* - Highlight all occurrences of symbol under cursor (=textDocument/documentHighlight=)
+- *Semantic tokens* - Rich highlighting: functions, macros, special forms, variables, keywords, classes (=textDocument/semanticTokens/full=)
+- *Inlay hints* - Show parameter names at function call sites (=textDocument/inlayHint=)
+- *Code lens* - Reference counts above definitions (=textDocument/codeLens=)
+
+*** Other
+- *Incremental document sync* - Efficient partial updates (=change: 2=)
 - *Zero external deps at runtime* - Queries the live SBCL image directly
 - *No Swank/Slynk required* - Self-contained LSP server
+
+** Requirements
+
+- [[http://www.sbcl.org/][SBCL]]
+- [[https://www.quicklisp.org/][Quicklisp]] (for build-time dependencies)
 
 ** Building
 
@@ -26,7 +57,7 @@ cd sextant
 make
 #+end_src
 
-This produces a =sextant= executable (~50MB compressed).
+This produces a =sextant= executable (~16MB compressed).
 
 ** Emacs Setup (eglot)
 
@@ -53,7 +84,7 @@ Or with =lsp-mode=:
 (add-hook 'lisp-mode-hook #'lsp)
 #+end_src
 
-** Neovim Setup
+** Neovim Setup (LazyVim)
 
 Add to =~/.config/nvim/lua/plugins/sextant.lua=:
 
@@ -64,14 +95,12 @@ return {
     opts = function(_, opts)
       local configs = require("lspconfig.configs")
       if not configs.sextant then
+        local util = require("lspconfig.util")
         configs.sextant = {
           default_config = {
             cmd = { "/path/to/sextant" },
             filetypes = { "lisp" },
-            root_dir = function(fname)
-              return require("lspconfig.util").find_git_ancestor(fname)
-                or vim.fn.getcwd()
-            end,
+            root_dir = util.root_pattern(".git", "*.asd", "*.asdf") or util.path.dirname,
             settings = {},
           },
         }
@@ -80,6 +109,12 @@ return {
     end,
   },
 }
+#+end_src
+
+To enable inlay hints in Neovim:
+
+#+begin_src lua
+vim.lsp.inlay_hint.enable(true)
 #+end_src
 
 ** Helix Setup
@@ -105,9 +140,9 @@ sextant/
     package.lisp         ; Package definition
     json.lisp            ; Minimal JSON reader/writer (no deps)
     transport.lisp       ; LSP JSON-RPC over stdio
-    document.lisp        ; Open file tracking, symbol-at-position
-    lisp-introspection.lisp  ; Query running SBCL for docs/completions/defs
-    handlers.lisp        ; LSP method dispatch
+    document.lisp        ; Open file tracking, s-expression utilities
+    lisp-introspection.lisp  ; Query running SBCL for docs/completions/defs/refs
+    handlers.lisp        ; LSP method dispatch (all 22 methods)
     server.lisp          ; Main message loop
     main.lisp            ; Entry point
 #+end_src
@@ -122,6 +157,13 @@ This means:
 - All of CL's 978 standard symbols are available immediately
 - Quicklisp packages can be loaded into the server for their docs too
 - Macros, reader macros, and dynamic features Just Work
+
+For diagnostics, Sextant reads each top-level form from the buffer and compiles it in a
+sandbox via =(compile nil `(lambda () ,form))=, collecting any errors and warnings.
+
+For references and call hierarchy, it uses =sb-introspect:who-calls=,
+=sb-introspect:who-binds=, =sb-introspect:who-references=, and
+=sb-introspect:who-macroexpands=.
 
 ** Debug Logging
 
