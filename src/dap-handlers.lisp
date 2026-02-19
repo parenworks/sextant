@@ -397,10 +397,31 @@
              :body (make-json-object
                     "result" text
                     "variablesReference" 0)))))
-      ;; Regular evaluation
+      ;; Regular evaluation — run in a separate thread so errors
+      ;; propagate to the debugger hook instead of being caught here
       (t
-       (let ((result (eval-in-context expression)))
-         (make-dap-response seq "evaluate"
-           :body (make-json-object
-                  "result" result
-                  "variablesReference" 0)))))))
+       (if (string= context "repl")
+           ;; REPL: eval in background thread, errors trigger debugger
+           (progn
+             (bt:make-thread
+              (lambda ()
+                (handler-case
+                    (let* ((form (read-from-string expression))
+                           (result (format nil "~s" (eval form))))
+                      (send-dap-output "console"
+                                       (format nil "~a~%" result)))
+                  ;; Only catch read errors — eval errors go to debugger hook
+                  (reader-error (e)
+                    (send-dap-output "stderr"
+                                     (format nil "Read error: ~a~%" e)))))
+              :name "dap-repl-eval")
+             (make-dap-response seq "evaluate"
+               :body (make-json-object
+                      "result" ""
+                      "variablesReference" 0)))
+           ;; Non-REPL (hover etc): catch errors, return as text
+           (let ((result (eval-in-context expression)))
+             (make-dap-response seq "evaluate"
+               :body (make-json-object
+                      "result" result
+                      "variablesReference" 0))))))))

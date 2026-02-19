@@ -188,13 +188,19 @@ Returns list of (:name :description :index)."
       (when (< index (length restarts))
         (invoke-restart (nth index restarts))))))
 
-(defun eval-in-context (expression)
-  "Evaluate an expression string in the current debug context."
-  (handler-case
+(defun eval-in-context (expression &key (allow-debugger nil))
+  "Evaluate an expression string in the current debug context.
+When ALLOW-DEBUGGER is true, let errors propagate to the debugger hook."
+  (if allow-debugger
+      ;; Let errors trigger the debugger hook (for REPL eval)
       (let ((form (read-from-string expression)))
         (format nil "~s" (eval form)))
-    (error (e)
-      (format nil "Error: ~a" e))))
+      ;; Catch errors and return as text (for hover eval etc.)
+      (handler-case
+          (let ((form (read-from-string expression)))
+            (format nil "~s" (eval form)))
+        (error (e)
+          (format nil "Error: ~a" e)))))
 
 (defun list-all-threads ()
   "List all SBCL threads. Returns list of (:id :name)."
