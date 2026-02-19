@@ -1,0 +1,203 @@
+#+TITLE: Sextant DAP — Debug Adapter Protocol for Common Lisp
+#+AUTHOR: Glenn Thompson
+#+DATE: 2025-02-19
+
+* Overview
+
+Add DAP (Debug Adapter Protocol) support to Sextant, enabling interactive
+debugging of Common Lisp code from any DAP-capable editor (Neovim, Emacs,
+VS Code, Helix).
+
+Sextant already runs a live SBCL image. The debugger leverages SBCL's
+condition system, =sb-debug=, and =sb-di= (debug internals) to provide
+breakpoints, stepping, variable inspection, and restart selection.
+
+* Architecture
+
+** Single Binary, Dual Mode
+
+#+begin_src text
+sextant              → LSP mode (default, current behavior)
+sextant --dap        → DAP mode (new)
+#+end_src
+
+Both modes share:
+- JSON reader/writer (=json.lisp=)
+- Transport layer (=transport.lisp=, same Content-Length framing)
+- Lisp introspection (=lisp-introspection.lisp=)
+
+DAP-specific modules:
+- =dap-server.lisp=     — DAP message loop and lifecycle
+- =dap-handlers.lisp=   — DAP request/event handlers
+- =debugger.lisp=       — SBCL debugger integration
+
+** How It Works
+
+#+begin_src text
+Editor (nvim-dap)  ←→  sextant --dap  ←→  SBCL internals
+                        (DAP server)       (sb-debug, sb-di)
+                             |
+                             ↓
+                        User's .lisp files
+                        (loaded into image)
+#+end_src
+
+The DAP server installs a custom =*debugger-hook*= that intercepts
+conditions and translates them into DAP =stopped= events. The editor
+then queries stack frames, variables, and available restarts.
+
+* DAP Protocol — Required Messages
+
+** Lifecycle
+| Request        | Description                          | SBCL Mapping                    |
+|----------------+--------------------------------------+---------------------------------|
+| =initialize=   | Negotiate capabilities               | Return supported features       |
+| =launch=       | Load and run a .lisp file            | =(load file)= then =(funcall)= |
+| =attach=       | Attach to the running SBCL image     | Already running — just hook in  |
+| =disconnect=   | Detach debugger                      | Remove debugger hook            |
+| =terminate=    | Stop the debuggee                    | =(sb-ext:exit)= or unhook      |
+
+** Breakpoints
+| Request                   | Description                | SBCL Mapping                         |
+|---------------------------+----------------------------+--------------------------------------|
+| =setBreakpoints=          | Set line breakpoints       | Instrument function entry/exit       |
+| =setFunctionBreakpoints=  | Break on function call     | =sb-debug::activate-breakpoint=      |
+| =setExceptionBreakpoints= | Break on conditions        | Custom =*debugger-hook*=             |
+
+** Execution Control
+| Request      | Description        | SBCL Mapping                              |
+|--------------+--------------------+-------------------------------------------|
+| =continue=   | Resume execution   | Invoke a restart (e.g., =continue=)       |
+| =next=       | Step over          | =sb-debug::step-next= / frame stepping   |
+| =stepIn=     | Step into          | =sb-debug::step-into=                     |
+| =stepOut=    | Step out           | =sb-debug::step-out=                      |
+
+** Inspection
+| Request        | Description              | SBCL Mapping                          |
+|----------------+--------------------------+---------------------------------------|
+| =threads=      | List threads             | =sb-thread:list-all-threads=          |
+| =stackTrace=   | Get stack frames         | =sb-debug:list-backtrace=             |
+| =scopes=       | Get variable scopes      | Frame locals + globals                |
+| =variables=    | Get variable values      | =sb-di:debug-fun-lambda-list=,        |
+|                |                          | =sb-di:frame-var-value=               |
+| =evaluate=     | Eval expression in frame | =(eval-in-frame expr frame)=          |
+
+** Events (Server → Client)
+| Event          | When                                    |
+|----------------+-----------------------------------------|
+| =stopped=      | Condition signaled / breakpoint hit     |
+| =continued=    | Execution resumed                       |
+| =output=       | Print output from debuggee              |
+| =terminated=   | Program finished                        |
+| =thread=       | Thread started/exited                   |
+
+* CL Condition System → DAP Mapping
+
+This is the killer feature. CL's condition/restart system maps naturally:
+
+| CL Concept      | DAP Concept                              |
+|------------------+------------------------------------------|
+| Condition        | Exception / stopped event                |
+| Restart          | DAP doesn't have this — expose via       |
+|                  | custom =evaluate= or =completions=       |
+| =*debugger-hook*= | Entry point for all DAP stopped events |
+| Backtrace        | =stackTrace= response                   |
+| Frame locals     | =variables= response                    |
+
+** Restart Selection
+
+DAP has no native "restart" concept. Options:
+1. Expose restarts as a *custom command* via =evaluate= (e.g., type =:restart 0=)
+2. Show restarts in the *debug console* as clickable options
+3. Map restarts to DAP's =exceptionInfo= response
+
+* Implementation Plan
+
+** Phase 1: Skeleton
+- [ ] Add =--dap= flag to =main.lisp=
+- [ ] Create =dap-server.lisp= — message loop (reuse transport)
+- [ ] Create =dap-handlers.lisp= — initialize/launch/attach/disconnect
+- [ ] DAP capabilities response
+
+** Phase 2: Debugger Core
+- [ ] Install =*debugger-hook*= to intercept conditions
+- [ ] =stopped= event on condition
+- [ ] =stackTrace= — walk SBCL backtrace
+- [ ] =scopes= and =variables= — frame locals via =sb-di=
+- [ ] =evaluate= — eval in frame context
+- [ ] =threads= — list SBCL threads
+
+** Phase 3: Breakpoints
+- [ ] =setExceptionBreakpoints= — break on all/specific condition types
+- [ ] =setFunctionBreakpoints= — instrument named functions
+- [ ] =setBreakpoints= — line-level (harder, may need source mapping)
+
+** Phase 4: Execution Control
+- [ ] =continue= — invoke restart
+- [ ] =stepIn= / =stepOut= / =next= — SBCL stepping support
+- [ ] Restart selection UI via debug console
+
+** Phase 5: Polish
+- [ ] =output= events for =*standard-output*= capture
+- [ ] =terminated= event
+- [ ] Neovim DAP config in README
+- [ ] Emacs dap-mode config in README
+
+* Neovim Integration
+
+#+begin_src lua
+-- In your nvim-dap config:
+dap.adapters.commonlisp = {
+  type = "executable",
+  command = "/path/to/sextant",
+  args = { "--dap" },
+}
+
+dap.configurations.lisp = {
+  {
+    type = "commonlisp",
+    name = "Launch file",
+    request = "launch",
+    program = "${file}",
+    projectDir = "${workspaceFolder}",
+  },
+  {
+    type = "commonlisp",
+    name = "Attach to image",
+    request = "attach",
+  },
+}
+#+end_src
+
+* Emacs Integration
+
+#+begin_src emacs-lisp
+;; With dap-mode:
+(dap-register-debug-provider "commonlisp"
+  (lambda (conf)
+    (plist-put conf :dap-server-path '("/path/to/sextant" "--dap"))
+    conf))
+
+(dap-register-debug-template "CL Launch"
+  (list :type "commonlisp"
+        :request "launch"
+        :program "${file}"))
+#+end_src
+
+* Open Questions
+
+1. Should =launch= load the file into the existing image or spawn a child SBCL?
+   - Loading into existing image is simpler and more CL-idiomatic
+   - Child process gives isolation but loses introspection benefits
+
+2. How to handle =step= in compiled code?
+   - SBCL needs =(declaim (optimize (debug 3)))= for full stepping
+   - Could auto-recompile with debug quality when breakpoints are set
+
+3. Should DAP and LSP run simultaneously?
+   - Could run on separate stdio streams (LSP on stdin/stdout, DAP on a socket)
+   - Or keep them as separate processes sharing the same binary
+
+4. How to present restarts to the user?
+   - Most natural: show in debug console with numbered options
+   - User types =:restart 2= or =:r 2= to invoke
