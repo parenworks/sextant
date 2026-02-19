@@ -13,6 +13,8 @@
     (null (write-string "null" stream))
     ((eql t) (write-string "true" stream))
     ((eql :false) (write-string "false" stream))
+    ((eql :empty-array) (write-string "[]" stream))
+    ((eql :null) (write-string "null" stream))
     (integer (format stream "~d" obj))
     (float (format stream "~f" obj))
     (string (json-write-string obj stream))

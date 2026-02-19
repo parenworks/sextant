@@ -54,6 +54,11 @@ Called from the LSP server's start-server function."
         (sb-bsd-sockets:socket-close *dap-server-socket*)
       (error () nil))
     (setf *dap-server-socket* nil))
+  (when (and *dap-thread* (bt:thread-alive-p *dap-thread*))
+    (handler-case
+        (bt:destroy-thread *dap-thread*)
+      (error () nil))
+    (setf *dap-thread* nil))
   (lsp-log "DAP server stopped"))
 
 (defun handle-dap-connection (socket)

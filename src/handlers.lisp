@@ -684,7 +684,7 @@ Returns (values match-start match-end name symbol-kind line) or NIL."
     (when text
       (let ((tokens (collect-semantic-tokens text)))
         (make-json-object
-         "data" tokens)))))
+         "data" (or tokens :empty-array))))))
 
 (defun collect-semantic-tokens (text)
   "Collect semantic tokens from TEXT.
@@ -1044,17 +1044,18 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
                  "textDocument/publishDiagnostics"
                  (make-json-object
                   "uri" uri
-                  "diagnostics" (mapcar
-                                 (lambda (d)
-                                   (destructuring-bind (line col message severity) d
-                                     (make-json-object
-                                      "range" (make-json-object
-                                                "start" (make-json-object "line" line "character" col)
-                                                "end" (make-json-object "line" line "character" col))
-                                      "severity" severity
-                                      "source" "sextant"
-                                      "message" message)))
-                                 diags)))))
+                  "diagnostics" (or (mapcar
+                                     (lambda (d)
+                                       (destructuring-bind (line col message severity) d
+                                         (make-json-object
+                                          "range" (make-json-object
+                                                    "start" (make-json-object "line" line "character" col)
+                                                    "end" (make-json-object "line" line "character" col))
+                                          "severity" severity
+                                          "source" "sextant"
+                                          "message" message)))
+                                     diags)
+                                    :empty-array)))))
           (write-lsp-message notification *lsp-output*))))))
 
 ;;; --- Document Sync ---
