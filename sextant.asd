@@ -17,5 +17,8 @@
                  (:file "document")
                  (:file "lisp-introspection")
                  (:file "handlers")
+                 (:file "debugger")
+                 (:file "dap-handlers")
+                 (:file "dap-server")
                  (:file "server")
                  (:file "main")))))
