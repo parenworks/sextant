@@ -184,20 +184,32 @@ dap.configurations.lisp = {
         :program "${file}"))
 #+end_src
 
-* Open Questions
+* Design Decisions
 
-1. Should =launch= load the file into the existing image or spawn a child SBCL?
-   - Loading into existing image is simpler and more CL-idiomatic
-   - Child process gives isolation but loses introspection benefits
+1. *LSP and DAP run simultaneously in the same process.*
+   - LSP on stdio (stdin/stdout) — unchanged from current behavior
+   - DAP on a TCP socket (e.g., =localhost:6009=)
+   - Same SBCL image — full introspection shared between both
+   - Sextant starts the DAP listener thread alongside the LSP loop
 
-2. How to handle =step= in compiled code?
+2. *=launch= loads the file into the existing image.*
+   - More CL-idiomatic — the whole point is a live image
+   - Keeps introspection benefits (who-calls, completions, etc.)
+   - No child process complexity
+
+3. *Auto-recompile with debug quality when breakpoints are set.*
    - SBCL needs =(declaim (optimize (debug 3)))= for full stepping
-   - Could auto-recompile with debug quality when breakpoints are set
+   - When =setBreakpoints= is called, recompile the target function
+     with debug 3 to enable stepping
 
-3. Should DAP and LSP run simultaneously?
-   - Could run on separate stdio streams (LSP on stdin/stdout, DAP on a socket)
-   - Or keep them as separate processes sharing the same binary
+4. *Restarts shown in debug console with numbered options.*
+   - On condition, send restarts as =output= events to the debug console
+   - User types =:restart 2= or =:r 2= in the evaluate prompt
+   - Also expose via =exceptionInfo= response
 
-4. How to present restarts to the user?
-   - Most natural: show in debug console with numbered options
-   - User types =:restart 2= or =:r 2= to invoke
+#+begin_src text
+Architecture:
+
+  Editor LSP client  ←→  stdin/stdout  ←→  Sextant (one SBCL process)
+  Editor DAP client  ←→  TCP :6009    ←→       ↑ same process
+#+end_src
