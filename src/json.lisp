@@ -9,18 +9,23 @@
 
 (defun json-write (obj stream)
   "Write OBJ as JSON to STREAM."
-  (etypecase obj
-    (null (write-string "null" stream))
-    ((eql t) (write-string "true" stream))
-    ((eql :false) (write-string "false" stream))
-    (integer (format stream "~d" obj))
-    (float (format stream "~f" obj))
-    (string (json-write-string obj stream))
-    (keyword (json-write-string (string-downcase (symbol-name obj)) stream))
-    (hash-table (json-write-object obj stream))
-    (list (if (json-alist-p obj)
-              (json-write-alist obj stream)
-              (json-write-array obj stream)))))
+  (cond
+    ;; Lists (including the empty list NIL) are serialized as JSON arrays.
+    ((listp obj)
+     (if (json-alist-p obj)
+         (json-write-alist obj stream)
+         (json-write-array obj stream)))
+    ;; Explicit JSON null remains representable by the symbol :json-null if needed;
+    ;; fall back to writing "null" for NIL values that are not lists.
+    ((null obj) (write-string "null" stream))
+    ((eql obj t) (write-string "true" stream))
+    ((eql obj :false) (write-string "false" stream))
+    ((integerp obj) (format stream "~d" obj))
+    ((floatp obj) (format stream "~f" obj))
+    ((stringp obj) (json-write-string obj stream))
+    ((keywordp obj) (json-write-string (string-downcase (symbol-name obj)) stream))
+    ((hash-table-p obj) (json-write-object obj stream))
+    (t (error "json-write: unsupported type ~a" (type-of obj)))))
 
 (defun json-write-string (s stream)
   "Write S as a JSON string with escaping."
