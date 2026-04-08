@@ -74,6 +74,17 @@ Content-Length is in bytes, so we read bytes and decode to UTF-8."
             body)
     (force-output stream)))
 
+(defun write-lsp-body (body &optional (stream *lsp-output*))
+  "Write BODY (a JSON string) as an LSP message without further serialization.
+This is a small escape hatch used when the JSON writer cannot represent a value
+exactly as needed (e.g. distinguishing JSON null from an empty array)."
+  (lsp-log ">>> (raw) ~a" body)
+  (format stream "Content-Length: ~d~c~c~c~c~a"
+          (length (babel:string-to-octets body :encoding :utf-8))
+          #\Return #\Linefeed #\Return #\Linefeed
+          body)
+  (force-output stream))
+
 (defun make-response (id result)
   "Create a JSON-RPC response for request ID with RESULT."
   (make-json-object "jsonrpc" "2.0"
