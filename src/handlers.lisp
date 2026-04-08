@@ -1039,23 +1039,30 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
   (let ((text (document-text uri)))
     (when text
       (let ((diags (compile-and-collect-diagnostics text)))
-        (let ((notification
-                (make-notification
-                 "textDocument/publishDiagnostics"
-                 (make-json-object
-                  "uri" uri
-                  "diagnostics" (mapcar
-                                 (lambda (d)
-                                   (destructuring-bind (line col message severity) d
-                                     (make-json-object
-                                      "range" (make-json-object
-                                                "start" (make-json-object "line" line "character" col)
-                                                "end" (make-json-object "line" line "character" col))
-                                      "severity" severity
-                                      "source" "sextant"
-                                      "message" message)))
-                                 diags)))))
-          (write-lsp-message notification *lsp-output*))))))
+        (if (null diags)
+            ;; When there are no diagnostics, send an empty JSON array for
+            ;; "diagnostics". The JSON writer maps NIL to JSON null, so
+            ;; construct the JSON body directly and write it out.
+            (write-lsp-body
+             (format nil "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":\"~a\",\"diagnostics\":[]}}" uri)
+             *lsp-output*)
+            (let ((notification
+                   (make-notification
+                    "textDocument/publishDiagnostics"
+                    (make-json-object
+                     "uri" uri
+                     "diagnostics" (mapcar
+                                    (lambda (d)
+                                      (destructuring-bind (line col message severity) d
+                                        (make-json-object
+                                         "range" (make-json-object
+                                                   "start" (make-json-object "line" line "character" col)
+                                                   "end" (make-json-object "line" line "character" col))
+                                         "severity" severity
+                                         "source" "sextant"
+                                         "message" message)))
+                                    diags)))))
+              (write-lsp-message notification *lsp-output*)))))))
 
 ;;; --- Document Sync ---
 
