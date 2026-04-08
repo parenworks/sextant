@@ -1039,23 +1039,25 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
   (let ((text (document-text uri)))
     (when text
       (let ((diags (compile-and-collect-diagnostics text)))
-        (let ((notification
-                (make-notification
-                 "textDocument/publishDiagnostics"
-                 (make-json-object
-                  "uri" uri
-                  "diagnostics" (mapcar
-                                 (lambda (d)
-                                   (destructuring-bind (line col message severity) d
-                                     (make-json-object
-                                      "range" (make-json-object
-                                                "start" (make-json-object "line" line "character" col)
-                                                "end" (make-json-object "line" line "character" col))
-                                      "severity" severity
-                                      "source" "sextant"
-                                      "message" message)))
-                                 diags)))))
-          (write-lsp-message notification *lsp-output*))))))
+        (let ((diagnostics-value (if (null diags)
+                                     (json-empty-array)
+                                     (mapcar (lambda (d)
+                                               (destructuring-bind (line col message severity) d
+                                                 (make-json-object
+                                                  "range" (make-json-object
+                                                            "start" (make-json-object "line" line "character" col)
+                                                            "end" (make-json-object "line" line "character" col))
+                                                  "severity" severity
+                                                  "source" "sextant"
+                                                  "message" message)))
+                                             diags))))
+          (let ((notification
+                 (make-notification
+                  "textDocument/publishDiagnostics"
+                  (make-json-object
+                   "uri" uri
+                   "diagnostics" diagnostics-value))))
+            (write-lsp-message notification *lsp-output*)))))))
 
 ;;; --- Document Sync ---
 
