@@ -5,11 +5,21 @@
 ;;; No external dependencies - just enough for LSP JSON-RPC
 ;;; ============================================================
 
+;;; Sentinel to explicitly represent an empty JSON array when NIL might be overloaded.
+(defconstant +json-empty-array+ (list :json-empty-array)
+  "A unique sentinel value representing an explicit empty JSON array '[]' in serialized output.")
+
+(defun json-empty-array ()
+  "Return the sentinel value that serializes to an empty JSON array."
+  +json-empty-array+)
+
 ;;; --- JSON Writing ---
 
 (defun json-write (obj stream)
   "Write OBJ as JSON to STREAM."
   (cond
+    ;; Sentinel: explicit empty JSON array
+    ((eq obj +json-empty-array+) (write-string "[]" stream))
     ;; Lists (including the empty list NIL) are serialized as JSON arrays.
     ((listp obj)
      (if (json-alist-p obj)
