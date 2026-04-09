@@ -1032,31 +1032,6 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
                                                              "character" (cdr end-lc)))))
                                 occurrences)))))))))
 
-;;; --- Diagnostics ---
-
-(defun publish-diagnostics (uri)
-  "Compile the document at URI and publish diagnostics."
-  (let ((text (document-text uri)))
-    (when text
-      (let ((diags (compile-and-collect-diagnostics text)))
-        (let ((notification
-                (make-notification
-                 "textDocument/publishDiagnostics"
-                 (make-json-object
-                  "uri" uri
-                  "diagnostics" (mapcar
-                                 (lambda (d)
-                                   (destructuring-bind (line col message severity) d
-                                     (make-json-object
-                                      "range" (make-json-object
-                                                "start" (make-json-object "line" line "character" col)
-                                                "end" (make-json-object "line" line "character" col))
-                                      "severity" severity
-                                      "source" "sextant"
-                                      "message" message)))
-                                 diags)))))
-          (write-lsp-message notification *lsp-output*))))))
-
 ;;; --- Document Sync ---
 
 (defun handle-did-open (params)

@@ -227,7 +227,7 @@ Returns a list of captured-condition structs, empty if text reads cleanly."
         (with-input-from-string (stream text)
           (loop for form = (read stream nil :eof)
                 until (eq form :eof)))
-      (end-of-file (c)
+      (end-of-file ()
         (push (make-captured-condition
                :message "Unexpected end of file - unbalanced parentheses?"
                :severity +severity-error+
