@@ -12,6 +12,9 @@
 (defvar *lsp-output* *standard-output*
   "Output stream for LSP messages.")
 
+(defvar *lsp-output-lock* (bt:make-lock "lsp-output")
+  "Lock for writing to *lsp-output* from multiple threads.")
+
 (defvar *lsp-log* nil
   "Stream for debug logging. NIL to disable.")
 
@@ -68,11 +71,12 @@ Content-Length is in bytes, so we read bytes and decode to UTF-8."
   "Write OBJ as an LSP JSON-RPC message to STREAM."
   (let ((body (json-to-string obj)))
     (lsp-log ">>> ~a" body)
-    (format stream "Content-Length: ~d~c~c~c~c~a"
-            (length (babel:string-to-octets body :encoding :utf-8))
-            #\Return #\Linefeed #\Return #\Linefeed
-            body)
-    (force-output stream)))
+    (bt:with-lock-held (*lsp-output-lock*)
+      (format stream "Content-Length: ~d~c~c~c~c~a"
+              (length (babel:string-to-octets body :encoding :utf-8))
+              #\Return #\Linefeed #\Return #\Linefeed
+              body)
+      (force-output stream))))
 
 (defun make-response (id result)
   "Create a JSON-RPC response for request ID with RESULT."

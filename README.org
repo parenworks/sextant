@@ -19,7 +19,7 @@ LSP-capable editor.
 - *Go to definition* - Jump to source via SBCL introspection (=textDocument/definition=)
 - *Find references* - Who calls, binds, references, macroexpands (=textDocument/references=)
 - *Signature help* - Function arglist display (=textDocument/signatureHelp=)
-- *Diagnostics* - Compile buffer in sandbox, report errors/warnings (=textDocument/publishDiagnostics=)
+- *Diagnostics / Linting* - Compile-time warnings, unused variables, type errors, undefined functions (=textDocument/publishDiagnostics=)
 
 *** Navigation & Structure
 - *Document symbols* - Outline of all =def*= forms (=textDocument/documentSymbol=)
@@ -142,6 +142,7 @@ sextant/
     transport.lisp       ; LSP JSON-RPC over stdio
     document.lisp        ; Open file tracking, s-expression utilities
     lisp-introspection.lisp  ; Query running SBCL for docs/completions/defs/refs
+    diagnostics.lisp     ; Linting via compile-file + SBCL condition capture
     handlers.lisp        ; LSP method dispatch (all 22 methods)
     server.lisp          ; Main message loop
     main.lisp            ; Entry point
@@ -158,12 +159,83 @@ This means:
 - Quicklisp packages can be loaded into the server for their docs too
 - Macros, reader macros, and dynamic features Just Work
 
-For diagnostics, Sextant reads each top-level form from the buffer and compiles it in a
-sandbox via =(compile nil `(lambda () ,form))=, collecting any errors and warnings.
-
 For references and call hierarchy, it uses =sb-introspect:who-calls=,
 =sb-introspect:who-binds=, =sb-introspect:who-references=, and
 =sb-introspect:who-macroexpands=.
+
+** Diagnostics / Linting
+
+Sextant compiles your buffer using =compile-file= and captures SBCL's compiler
+conditions as LSP diagnostics. These appear as inline warnings and errors in your
+editor.
+
+What it catches:
+
+- *Unused variables* - "The variable X is defined but never used"
+- *Undefined functions* - "undefined function: FOO"
+- *Undefined variables* - "undefined variable: BAR"
+- *Wrong argument count* - "called with 3 arguments, but wants exactly 1"
+- *Type mismatches* - "Constant \"hello\" conflicts with its asserted type NUMBER"
+- *Unbalanced parentheses* - Reader pre-check catches these before compilation
+- *Reader syntax errors* - Bad reader macros, malformed strings, etc.
+
+Diagnostics run automatically when you open, edit, or save a file. Edits are
+debounced (0.5s) so the compiler is not invoked on every keystroke.
+
+Source positions are extracted from SBCL's internal compiler context
+(=sb-c::*compiler-error-context*=), with fallback to symbol-name search in the
+buffer text. This gives accurate positions for most warnings.
+
+** Using Sextant
+
+Once connected, Sextant works in the background. Here are the features and how
+to use them in Emacs (eglot) and other editors:
+
+*** Hover documentation
+
+Move your cursor over any symbol. Sextant shows its type, arglist, and
+docstring.
+
+- Emacs (eglot): =M-x eldoc= (automatic in the echo area), or =C-h .= for a
+  dedicated buffer
+- Neovim: =K= in normal mode
+- Helix: =Space k=
+
+*** Completions
+
+Start typing a symbol name (at least 2 characters). Sextant offers completions
+from all loaded packages.
+
+- Emacs (eglot): =C-M-i= or =M-TAB= (=completion-at-point=)
+- Neovim: Automatic via nvim-cmp or similar
+- Helix: Automatic
+
+*** Go to definition
+
+Jump to the source of any function, macro, or generic function.
+
+- Emacs (eglot): =M-.= (=xref-find-definitions=), =M-,= to jump back
+- Neovim: =gd=
+- Helix: =gd=
+
+*** Signature help
+
+See the arglist of the enclosing function as you type.
+
+- Emacs (eglot): Automatic in the echo area when inside a function call
+- Neovim: Automatic via LSP
+- Helix: Automatic
+
+*** Diagnostics
+
+View compiler warnings and errors inline. Sextant underlines problematic code
+and shows fringe markers.
+
+- Emacs (eglot/flymake): =M-x flymake-show-buffer-diagnostics= to list all,
+  =M-x flymake-goto-next-error= (=C-c ! n=) and
+  =M-x flymake-goto-prev-error= (=C-c ! p=) to navigate
+- Neovim: =]d= / =[d= to navigate, =Space e= to list
+- Helix: =]d= / =[d= to navigate
 
 ** Debug Logging
 

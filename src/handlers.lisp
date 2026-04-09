@@ -22,7 +22,7 @@
    "textDocumentSync" (make-json-object
                        "openClose" t
                        "change" 2  ; Incremental sync
-                       "save" t)
+                       "save" (make-json-object "includeText" t))
    "hoverProvider" t
    "completionProvider" (make-json-object
                          "triggerCharacters" (list "(" ":" "-")
@@ -1064,7 +1064,7 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
          (uri (json-get td "uri"))
          (text (json-get td "text")))
     (document-open uri text)
-    (publish-diagnostics uri)))
+    (schedule-diagnostics uri)))
 
 (defun handle-did-change (params)
   (let* ((td (json-get params "textDocument"))
@@ -1073,14 +1073,17 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
     (when changes
       (dolist (change changes)
         (apply-incremental-change uri change))
-      (publish-diagnostics uri))))
+      (schedule-diagnostics uri))))
 
 (defun handle-did-save (params)
   (let* ((td (json-get params "textDocument"))
          (uri (json-get td "uri")))
-    (publish-diagnostics uri)))
+    ;; Full diagnostic pass on save
+    (run-diagnostics uri)))
 
 (defun handle-did-close (params)
   (let* ((td (json-get params "textDocument"))
          (uri (json-get td "uri")))
+    ;; Clear diagnostics for closed document
+    (publish-diagnostics uri nil)
     (document-close uri)))
