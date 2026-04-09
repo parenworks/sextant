@@ -10,7 +10,7 @@
    "textDocumentSync" (make-json-object
                        "openClose" t
                        "change" 1  ; Full sync
-                       "save" t)
+                       "save" (make-json-object "includeText" t))
    "hoverProvider" t
    "completionProvider" (make-json-object
                          "triggerCharacters" (list "(" ":" "-"))
@@ -58,7 +58,8 @@
      (handle-did-change params))
     ((string= method "textDocument/didClose")
      (handle-did-close params))
-    ((string= method "textDocument/didSave") nil)
+    ((string= method "textDocument/didSave")
+     (handle-did-save params))
     (t (lsp-log "Unhandled notification: ~a" method))))
 
 ;;; --- Initialize ---
@@ -208,7 +209,8 @@
   (let* ((td (json-get params "textDocument"))
          (uri (json-get td "uri"))
          (text (json-get td "text")))
-    (document-open uri text)))
+    (document-open uri text)
+    (schedule-diagnostics uri)))
 
 (defun handle-did-change (params)
   (let* ((td (json-get params "textDocument"))
@@ -217,9 +219,18 @@
          (text (when (and changes (first changes))
                  (json-get (first changes) "text"))))
     (when text
-      (document-change uri text))))
+      (document-change uri text)
+      (schedule-diagnostics uri))))
+
+(defun handle-did-save (params)
+  (let* ((td (json-get params "textDocument"))
+         (uri (json-get td "uri")))
+    ;; Full diagnostic pass on save
+    (run-diagnostics uri)))
 
 (defun handle-did-close (params)
   (let* ((td (json-get params "textDocument"))
          (uri (json-get td "uri")))
+    ;; Clear diagnostics for closed document
+    (publish-diagnostics uri nil)
     (document-close uri)))

@@ -16,6 +16,7 @@
                  (:file "transport")
                  (:file "document")
                  (:file "lisp-introspection")
+                 (:file "diagnostics")
                  (:file "handlers")
                  (:file "server")
                  (:file "main")))))
