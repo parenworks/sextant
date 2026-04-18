@@ -120,7 +120,7 @@
   (lsp-log "Notification: ~a" method)
   (cond
     ((string= method "initialized") nil)
-    ((string= method "exit") (sb-ext:exit :code 0))
+    ((string= method "exit") (uiop:quit 0))
     ((string= method "textDocument/didOpen")
      (handle-did-open params))
     ((string= method "textDocument/didChange")
@@ -1039,6 +1039,7 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
          (uri (json-get td "uri"))
          (text (json-get td "text")))
     (document-open uri text)
+    (index-buffer uri text)
     (schedule-diagnostics uri)))
 
 (defun handle-did-change (params)
@@ -1048,11 +1049,18 @@ deltaLine, deltaStartChar, length, tokenType, tokenModifiers."
     (when changes
       (dolist (change changes)
         (apply-incremental-change uri change))
+      (let ((text (document-text uri)))
+        (when text
+          (index-buffer uri text)))
       (schedule-diagnostics uri))))
 
 (defun handle-did-save (params)
   (let* ((td (json-get params "textDocument"))
-         (uri (json-get td "uri")))
+         (uri (json-get td "uri"))
+         (path (uri-to-path uri)))
+    ;; Re-index from disk on save for accurate positions
+    (when (probe-file path)
+      (index-file path))
     ;; Full diagnostic pass on save
     (run-diagnostics uri)))
 

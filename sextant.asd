@@ -15,6 +15,7 @@
                  (:file "json")
                  (:file "transport")
                  (:file "document")
+                 (:file "source-index")
                  (:file "lisp-introspection")
                  (:file "diagnostics")
                  (:file "handlers")

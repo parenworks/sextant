@@ -2,8 +2,8 @@
 
 ;;; ============================================================
 ;;; Lisp Introspection
-;;; Queries the running SBCL image for symbol info
-;;; No Swank needed - we ARE the Lisp image
+;;; Queries the source index first, then the running image.
+;;; sb-introspect calls are behind #+sbcl for portability.
 ;;; ============================================================
 
 (defun find-symbol-in-packages (name)
@@ -36,65 +36,97 @@ Returns (values symbol package) or NIL."
 
 (defun symbol-hover-info (name)
   "Get hover documentation for symbol NAME. Returns a string or NIL."
-  (multiple-value-bind (sym pkg) (find-symbol-in-packages name)
-    (when sym
-      (with-output-to-string (s)
-        (let ((pkg-name (when pkg (package-name pkg))))
-          ;; Header
-          (format s "**~a~a**~%"
-                  (if pkg-name (format nil "~(~a~):" pkg-name) "")
-                  (string-downcase (symbol-name sym)))
-          (format s "~%")
-          ;; Type info
-          (cond
-            ((fboundp sym)
-             (let ((fn (symbol-function sym)))
-               (cond
-                 ((macro-function sym)
-                  (format s "*Macro*~%"))
-                 ((typep fn 'generic-function)
-                  (format s "*Generic Function*~%"))
-                 ((special-operator-p sym)
-                  (format s "*Special Operator*~%"))
-                 (t
-                  (format s "*Function*~%")))
-               ;; Arglist
-               (let ((arglist (handler-case
-                                  (sb-introspect:function-lambda-list sym)
-                                (error () nil))))
-                 (when arglist
+  ;; Try index first for arglist info
+  (let ((index-entries (index-lookup-definitions name)))
+    (multiple-value-bind (sym pkg) (find-symbol-in-packages name)
+      (when (or sym index-entries)
+        (with-output-to-string (s)
+          (let ((pkg-name (cond
+                            (pkg (package-name pkg))
+                            (index-entries (index-entry-package (first index-entries))))))
+            ;; Header
+            (format s "**~a~a**~%"
+                    (if pkg-name (format nil "~(~a~):" pkg-name) "")
+                    (string-downcase (if sym (symbol-name sym) name)))
+            (format s "~%")
+            ;; Type info
+            (cond
+              ((and sym (fboundp sym))
+               (let ((fn (symbol-function sym)))
+                 (cond
+                   ((macro-function sym)
+                    (format s "*Macro*~%"))
+                   ((typep fn 'generic-function)
+                    (format s "*Generic Function*~%"))
+                   ((special-operator-p sym)
+                    (format s "*Special Operator*~%"))
+                   (t
+                    (format s "*Function*~%")))
+                 ;; Arglist: prefer index, fall back to sb-introspect
+                 (let ((arglist (or (and index-entries
+                                        (index-entry-arglist (first index-entries)))
+                                    #+sbcl
+                                    (handler-case
+                                        (sb-introspect:function-lambda-list sym)
+                                      (error () nil)))))
+                   (when arglist
+                     (format s "```lisp~%(~(~a~)~{ ~(~a~)~})~%```~%"
+                             (string-downcase (if sym (symbol-name sym) name))
+                             arglist)))))
+              ;; Index-only definition (not in running image)
+              (index-entries
+               (let* ((entry (first index-entries))
+                      (kind (index-entry-kind entry)))
+                 (format s "*~a* (from source)~%"
+                         (string-capitalize (symbol-name kind)))
+                 (when (index-entry-arglist entry)
                    (format s "```lisp~%(~(~a~)~{ ~(~a~)~})~%```~%"
-                           (string-downcase (symbol-name sym))
-                           arglist)))))
-            ((boundp sym)
-             (format s "*Variable*~%")
-             (format s "Value: ~s~%" (symbol-value sym)))
-            ((find-class sym nil)
-             (format s "*Class*~%"))
-            (t
-             (format s "*Symbol*~%")))
-          ;; Documentation
-          (let ((doc (or (documentation sym 'function)
-                         (documentation sym 'variable)
-                         (documentation sym 'type)
-                         (documentation sym 'structure)
-                         (documentation sym 'setf))))
-            (when doc
-              (format s "~%---~%~a~%" doc))))))))
+                           (string-downcase name)
+                           (index-entry-arglist entry)))))
+              ((and sym (boundp sym))
+               (format s "*Variable*~%")
+               (format s "Value: ~s~%" (symbol-value sym)))
+              ((and sym (find-class sym nil))
+               (format s "*Class*~%"))
+              (t
+               (format s "*Symbol*~%")))
+            ;; Documentation (runtime only)
+            (when sym
+              (let ((doc (or (documentation sym 'function)
+                             (documentation sym 'variable)
+                             (documentation sym 'type)
+                             (documentation sym 'structure)
+                             (documentation sym 'setf))))
+                (when doc
+                  (format s "~%---~%~a~%" doc))))))))))
 
 (defun symbol-completions (prefix &optional (limit 50))
   "Return a list of completion candidates matching PREFIX.
-Each entry is (name kind detail)."
+Each entry is (name kind detail).
+Merges results from the source index and the running image."
   (let ((uprefix (string-upcase prefix))
         (results nil)
+        (seen (make-hash-table :test 'equal))
         (count 0))
+    ;; 1. Source index results (project-local symbols)
+    (let ((index-results (index-completions prefix limit)))
+      (dolist (r index-results)
+        (when (< count limit)
+          (let ((name (string-upcase (first r))))
+            (unless (gethash name seen)
+              (setf (gethash name seen) t)
+              (push r results)
+              (incf count))))))
+    ;; 2. Runtime image results (standard CL, loaded libraries)
     (dolist (pkg (list-all-packages))
       (when (>= count limit) (return))
       (do-external-symbols (sym pkg)
         (when (>= count limit) (return))
         (let ((name (symbol-name sym)))
           (when (and (>= (length name) (length uprefix))
-                     (string= uprefix name :end2 (length uprefix)))
+                     (string= uprefix name :end2 (length uprefix))
+                     (not (gethash name seen)))
+            (setf (gethash name seen) t)
             (push (list (string-downcase name)
                         (symbol-completion-kind sym)
                         (package-name pkg))
@@ -117,6 +149,16 @@ Each entry is (name kind detail)."
 (defun symbol-definition-location (name)
   "Find the source location of symbol NAME.
 Returns (path line col) or NIL."
+  ;; 1. Check source index first
+  (let ((entries (index-lookup-definitions name)))
+    (when entries
+      (let ((entry (first entries)))
+        (return-from symbol-definition-location
+          (list (index-entry-file entry)
+                (index-entry-line entry)
+                (index-entry-col entry))))))
+  ;; 2. Fall back to sb-introspect on SBCL
+  #+sbcl
   (multiple-value-bind (sym) (find-symbol-in-packages name)
     (when (and sym (fboundp sym))
       (let ((source (handler-case
@@ -190,11 +232,21 @@ Falls back to (0 . 0) if not found."
 ;;; --- References ---
 
 (defun find-symbol-references (name)
-  "Find all references to symbol NAME using SBCL introspection.
+  "Find all references to symbol NAME.
+Uses source index first, falls back to sb-introspect on SBCL.
 Returns a list of (path line col) entries."
-  (multiple-value-bind (sym) (find-symbol-in-packages name)
-    (when sym
-      (let ((results nil))
+  (let ((results nil))
+    ;; 1. Source index references
+    (let ((refs (index-lookup-references name)))
+      (dolist (ref refs)
+        (push (list (ref-entry-file ref)
+                    (ref-entry-line ref)
+                    (ref-entry-col ref))
+              results)))
+    ;; 2. Fall back to / augment with sb-introspect on SBCL
+    #+sbcl
+    (multiple-value-bind (sym) (find-symbol-in-packages name)
+      (when sym
         ;; Who calls this function?
         (when (fboundp sym)
           (handler-case
@@ -237,45 +289,66 @@ Returns a list of (path line col) entries."
                       (let ((path (namestring source))
                             (form-num (sb-introspect:definition-source-form-number expander)))
                         (push (list path (or form-num 0) 0) results))))))
-            (error () nil)))
-        ;; Deduplicate
-        (remove-duplicates results :test #'equal)))))
+            (error () nil)))))
+    ;; Deduplicate
+    (remove-duplicates results :test #'equal)))
 
 ;;; --- Workspace Symbols ---
 
 (defun search-workspace-symbols (query &optional (limit 100))
   "Search all known symbols matching QUERY string.
 Returns list of (name kind container-name path line col)."
-  (let ((uquery (string-upcase query))
-        (results nil)
+  (let ((results nil)
+        (seen (make-hash-table :test 'equal))
         (count 0))
-    (dolist (pkg (list-all-packages))
-      (when (>= count limit) (return))
-      (do-symbols (sym pkg)
-        (when (>= count limit) (return))
-        (let ((name (symbol-name sym)))
-          (when (search uquery name)
-            (let ((kind (symbol-lsp-kind sym))
-                  (pkg-name (package-name pkg))
-                  (loc (handler-case
-                           (when (fboundp sym)
-                             (let ((sources (sb-introspect:find-definition-sources-by-name
-                                             sym :function)))
-                               (when (and sources (first sources))
-                                 (let* ((src (first sources))
-                                        (path (sb-introspect:definition-source-pathname src))
-                                        (form-num (sb-introspect:definition-source-form-number src)))
-                                   (when path
-                                     (list (namestring path) (or form-num 0) 0))))))
-                         (error () nil))))
+    ;; 1. Source index results (project symbols with accurate locations)
+    (let ((index-results (index-search-symbols query limit)))
+      (dolist (entry index-results)
+        (when (< count limit)
+          (let ((name (index-entry-name entry)))
+            (unless (gethash name seen)
+              (setf (gethash name seen) t)
               (push (list (string-downcase name)
-                          kind
-                          (string-downcase pkg-name)
-                          (if loc (first loc) nil)
-                          (if loc (second loc) 0)
-                          (if loc (third loc) 0))
+                          (index-kind-to-lsp-symbol-kind (index-entry-kind entry))
+                          (string-downcase (index-entry-package entry))
+                          (index-entry-file entry)
+                          (index-entry-line entry)
+                          (index-entry-col entry))
                     results)
               (incf count))))))
+    ;; 2. Runtime image symbols (standard CL + loaded libraries)
+    (let ((uquery (string-upcase query)))
+      (dolist (pkg (list-all-packages))
+        (when (>= count limit) (return))
+        (do-symbols (sym pkg)
+          (when (>= count limit) (return))
+          (let ((name (symbol-name sym)))
+            (when (and (search uquery name)
+                       (not (gethash name seen)))
+              (setf (gethash name seen) t)
+              (let ((kind (symbol-lsp-kind sym))
+                    (pkg-name (package-name pkg))
+                    (loc #+sbcl
+                         (handler-case
+                             (when (fboundp sym)
+                               (let ((sources (sb-introspect:find-definition-sources-by-name
+                                               sym :function)))
+                                 (when (and sources (first sources))
+                                   (let* ((src (first sources))
+                                          (path (sb-introspect:definition-source-pathname src))
+                                          (form-num (sb-introspect:definition-source-form-number src)))
+                                     (when path
+                                       (list (namestring path) (or form-num 0) 0))))))
+                           (error () nil))
+                         #-sbcl nil))
+                (push (list (string-downcase name)
+                            kind
+                            (string-downcase pkg-name)
+                            (if loc (first loc) nil)
+                            (if loc (second loc) 0)
+                            (if loc (third loc) 0))
+                      results)
+                (incf count)))))))
     (nreverse results)))
 
 (defun symbol-lsp-kind (sym)
@@ -295,9 +368,20 @@ Returns list of (name kind container-name path line col)."
 (defun symbol-incoming-calls (name)
   "Find functions that call the symbol NAME.
 Returns list of (caller-name path line col)."
-  (multiple-value-bind (sym) (find-symbol-in-packages name)
-    (when (and sym (fboundp sym))
-      (let ((results nil))
+  (let ((results nil))
+    ;; Source index references can serve as incoming call approximation
+    (let ((refs (index-lookup-references name)))
+      (dolist (ref refs)
+        (push (list (format nil "ref@~a:~d" (file-namestring (ref-entry-file ref))
+                            (ref-entry-line ref))
+                    (ref-entry-file ref)
+                    (ref-entry-line ref)
+                    (ref-entry-col ref))
+              results)))
+    ;; sb-introspect gives semantic caller info on SBCL
+    #+sbcl
+    (multiple-value-bind (sym) (find-symbol-in-packages name)
+      (when (and sym (fboundp sym))
         (handler-case
             (let ((callers (sb-introspect:who-calls sym)))
               (dolist (caller callers)
@@ -311,8 +395,8 @@ Returns list of (caller-name path line col)."
                       (push (list (format nil "~(~a~)" caller-name)
                                   path form-num 0)
                             results))))))
-          (error () nil))
-        (remove-duplicates results :test #'equal)))))
+          (error () nil))))
+    (remove-duplicates results :test #'equal)))
 
 (defun symbol-outgoing-calls (name)
   "Find functions that the symbol NAME calls.
@@ -361,33 +445,51 @@ class, keyword, comment, or nil."
 (defun function-keyword-params (name)
   "Get keyword parameters for function NAME.
 Returns list of keyword parameter names, or NIL."
+  (let ((arglist (get-function-arglist name)))
+    (when arglist
+      (let ((collecting nil)
+            (keywords nil))
+        (dolist (arg arglist)
+          (cond
+            ((eq arg '&key) (setf collecting t))
+            ((member arg '(&rest &optional &allow-other-keys &aux &body &whole &environment))
+             (setf collecting nil))
+            (collecting
+             (push (cond
+                     ((symbolp arg) arg)
+                     ((consp arg) (if (consp (car arg))
+                                      (caar arg)
+                                      (car arg)))
+                     (t arg))
+                   keywords))))
+        (nreverse keywords)))))
+
+(defun get-function-arglist (name)
+  "Get the arglist for function NAME from index or runtime.
+Returns the lambda list or NIL."
+  ;; 1. Source index
+  (let ((entries (index-lookup-definitions name)))
+    (when entries
+      (let ((arglist (index-entry-arglist (first entries))))
+        (when arglist (return-from get-function-arglist arglist)))))
+  ;; 2. sb-introspect fallback
+  #+sbcl
   (multiple-value-bind (sym) (find-symbol-in-packages name)
     (when (and sym (fboundp sym))
       (handler-case
-          (let ((arglist (sb-introspect:function-lambda-list sym)))
-            (let ((collecting nil)
-                  (keywords nil))
-              (dolist (arg arglist)
-                (cond
-                  ((eq arg '&key) (setf collecting t))
-                  ((member arg '(&rest &optional &allow-other-keys &aux &body &whole &environment))
-                   (setf collecting nil))
-                  (collecting
-                   (push (cond
-                           ((symbolp arg) arg)
-                           ((consp arg) (if (consp (car arg))
-                                            (caar arg)
-                                            (car arg)))
-                           (t arg))
-                         keywords))))
-              (nreverse keywords)))
+          (sb-introspect:function-lambda-list sym)
         (error () nil)))))
 
 (defun function-reference-count (name)
   "Count how many places reference symbol NAME."
-  (multiple-value-bind (sym) (find-symbol-in-packages name)
-    (when sym
-      (let ((count 0))
+  (let ((count 0))
+    ;; Source index references
+    (let ((refs (index-lookup-references name)))
+      (incf count (length refs)))
+    ;; sb-introspect augmentation on SBCL
+    #+sbcl
+    (multiple-value-bind (sym) (find-symbol-in-packages name)
+      (when sym
         (when (fboundp sym)
           (handler-case
               (incf count (length (sb-introspect:who-calls sym)))
@@ -402,18 +504,18 @@ Returns list of keyword parameter names, or NIL."
         (when (macro-function sym)
           (handler-case
               (incf count (length (sb-introspect:who-macroexpands sym)))
-            (error () nil)))
-        count))))
+            (error () nil)))))
+    count))
 
 (defun symbol-signature (name)
   "Get function signature for NAME. Returns (name arglist doc) or NIL."
-  (multiple-value-bind (sym) (find-symbol-in-packages name)
-    (when (and sym (fboundp sym))
-      (let ((arglist (handler-case
-                         (sb-introspect:function-lambda-list sym)
-                       (error () nil)))
-            (doc (documentation sym 'function)))
-        (when arglist
-          (list (string-downcase (symbol-name sym))
-                arglist
-                doc))))))
+  (let ((arglist (get-function-arglist name))
+        (doc nil))
+    ;; Try to get documentation from runtime
+    (multiple-value-bind (sym) (find-symbol-in-packages name)
+      (when sym
+        (setf doc (documentation sym 'function))))
+    (when arglist
+      (list (string-downcase name)
+            arglist
+            doc))))

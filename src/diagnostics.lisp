@@ -40,6 +40,7 @@
 
 ;;; --- Source location extraction from SBCL compiler internals ---
 
+#+sbcl
 (defun extract-compiler-context-position (text)
   "Extract source position from SBCL's *compiler-error-context*.
 Returns (line . col) or NIL."
@@ -60,6 +61,7 @@ Returns (line . col) or NIL."
            (when (and sp (listp sp))
              (extract-position-from-source-path sp text))))))))
 
+#+sbcl
 (defun extract-position-from-source-path (source-path text)
   "Convert an SBCL source-path to (line . col).
 SOURCE-PATH is like (ORIGINAL-SOURCE-START form-idx subform-idx ...)."
@@ -134,6 +136,7 @@ Returns (line . col) or NIL."
   "Try to extract a source position from CONDITION.
 Returns (line . col) or NIL."
   ;; First try SBCL compiler context (most accurate)
+  #+sbcl
   (let ((ctx-pos (extract-compiler-context-position text)))
     (when ctx-pos
       (return-from extract-position-from-condition ctx-pos)))
