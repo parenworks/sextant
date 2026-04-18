@@ -18,5 +18,8 @@
                  (:file "lisp-introspection")
                  (:file "diagnostics")
                  (:file "handlers")
+                 (:file "debugger")
+                 (:file "dap-handlers")
+                 (:file "dap-server")
                  (:file "server")
                  (:file "main")))))

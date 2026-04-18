@@ -5,13 +5,15 @@
 ;;; Reads messages from stdin, dispatches, writes responses
 ;;; ============================================================
 
-(defun start-server (&key (log-file nil))
-  "Start the Sextant LSP server on stdio."
+(defun start-server (&key (log-file nil) (dap-port 6009))
+  "Start the Sextant LSP server on stdio with DAP server on TCP."
   (when log-file
     (setf *lsp-log* (open log-file :direction :output
                                     :if-exists :append
                                     :if-does-not-exist :create)))
   (lsp-log "Sextant LSP server starting...")
+  ;; Start DAP server on TCP in background
+  (start-dap-server :port dap-port)
   (unwind-protect
       (loop
         (let ((msg (read-lsp-message *lsp-input*)))
@@ -34,6 +36,7 @@
                (handle-notification method params))
               (t
                (lsp-log "Unknown message format"))))))
+    (stop-dap-server)
     (when *lsp-log*
       (lsp-log "Sextant LSP server shutting down")
       (close *lsp-log*)

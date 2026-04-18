@@ -684,7 +684,7 @@ Returns (values match-start match-end name symbol-kind line) or NIL."
     (when text
       (let ((tokens (collect-semantic-tokens text)))
         (make-json-object
-         "data" tokens)))))
+         "data" (or tokens :empty-array))))))
 
 (defun collect-semantic-tokens (text)
   "Collect semantic tokens from TEXT.
