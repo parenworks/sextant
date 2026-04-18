@@ -40,6 +40,7 @@
 
 ;;; --- Source location extraction from SBCL compiler internals ---
 
+#+sbcl
 (defun extract-source-path-position (text)
   "Extract a precise source position from SBCL's source-path data when available.
 Source-paths are set on IR nodes and encode the exact form path.
@@ -52,6 +53,7 @@ Returns (line . col) or NIL."
           (when (and sp (listp sp))
             (extract-position-from-source-path sp text)))))))
 
+#+sbcl
 (defun extract-compiler-context-position (text)
   "Extract source position from SBCL's *compiler-error-context*.
 Tries source-path first (precise), then file-position (form-level only).
@@ -74,6 +76,7 @@ Returns (line . col) or NIL."
              (offset-to-line-col text (min fpos (length text))))))))))
 
 
+#+sbcl
 (defun extract-position-from-source-path (source-path text)
   "Convert an SBCL source-path to (line . col).
 SOURCE-PATH is like (ORIGINAL-SOURCE-START form-idx subform-idx ...) where
@@ -205,6 +208,7 @@ Returns (line . col) or NIL."
   "Try to extract a source position from CONDITION.
 Returns (line . col) or NIL."
   ;; First try SBCL compiler context (most accurate)
+  #+sbcl
   (let ((ctx-pos (extract-compiler-context-position text)))
     (when ctx-pos
       (return-from extract-position-from-condition ctx-pos)))
