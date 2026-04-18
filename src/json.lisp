@@ -20,14 +20,13 @@
   (cond
     ;; Sentinel: explicit empty JSON array
     ((eq obj +json-empty-array+) (write-string "[]" stream))
-    ;; Lists (including the empty list NIL) are serialized as JSON arrays.
+    ;; NIL means JSON null (use json-empty-array for an explicit empty array)
+    ((null obj) (write-string "null" stream))
+    ;; Non-NIL lists: alists become JSON objects, others become JSON arrays
     ((listp obj)
      (if (json-alist-p obj)
          (json-write-alist obj stream)
          (json-write-array obj stream)))
-    ;; Explicit JSON null remains representable by the symbol :json-null if needed;
-    ;; fall back to writing "null" for NIL values that are not lists.
-    ((null obj) (write-string "null" stream))
     ((eql obj t) (write-string "true" stream))
     ((eql obj :false) (write-string "false" stream))
     ((integerp obj) (format stream "~d" obj))
