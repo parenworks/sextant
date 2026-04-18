@@ -116,7 +116,7 @@ Returns the file-position of the first non-whitespace, non-comment character."
 Returns (line . col) or NIL."
   (handler-case
       (with-input-from-string (stream text)
-        (let ((form-count 0))ou switch 
+        (let ((form-count 0))
           (loop
             ;; Skip whitespace and comments to find actual form start
             (let ((pos (skip-whitespace-and-comments stream)))
