@@ -34,45 +34,88 @@ Returns (values symbol package) or NIL."
         (when (eq status :external)
           (return-from find-symbol-in-packages (values sym pkg)))))))
 
+(defvar *hover-max-width* 72
+  "Soft maximum line width for hover documentation output.")
+
+(defun format-arglist (sym-name arglist &optional (max-width *hover-max-width*))
+  "Format SYM-NAME and ARGLIST as a lambda-list string, wrapping long lines.
+Each argument goes on its own line when the single-line form exceeds MAX-WIDTH."
+  (let* ((name-str (string-downcase sym-name))
+         (arg-strs (mapcar (lambda (a) (string-downcase (format nil "~s" a))) arglist))
+         (single-line (format nil "(~a~{~^ ~a~})" name-str arg-strs))
+         (indent (make-string (+ 2 (length name-str)) :initial-element #\Space)))
+    (if (<= (length single-line) max-width)
+        single-line
+        (with-output-to-string (s)
+          (write-char #\( s)
+          (write-string name-str s)
+          (loop for arg in arg-strs
+                do (write-char #\Newline s)
+                   (write-string indent s)
+                   (write-string arg s))
+          (write-char #\) s)))))
+
+(defun clean-docstring (doc)
+  "Trim trailing whitespace from each line, collapse multiple blank lines,
+and strip leading/trailing blank lines from the result."
+  (let ((lines (let (acc)
+                 (with-input-from-string (in doc)
+                   (loop for line = (read-line in nil nil)
+                         while line
+                         do (push (string-right-trim '(#\Space #\Tab) line) acc)))
+                 (nreverse acc)))
+        (out nil)
+        (blank-run 0))
+    (dolist (line lines)
+      (if (string= line "")
+          (incf blank-run)
+          (progn
+            (when (and out (> blank-run 0))
+              (push "" out))
+            (setf blank-run 0)
+            (push line out))))
+    (let ((result (nreverse out)))
+      (with-output-to-string (s)
+        (loop for (line . rest) on result
+              do (write-string line s)
+              when rest do (write-char #\Newline s))))))
+
 (defun symbol-hover-info (name)
-  "Get hover documentation for symbol NAME. Returns a string or NIL."
+  "Get hover documentation for symbol NAME. Returns a markdown string or NIL."
   (multiple-value-bind (sym pkg) (find-symbol-in-packages name)
     (when sym
       (with-output-to-string (s)
         (let ((pkg-name (when pkg (package-name pkg))))
-          ;; Header
-          (format s "**~a~a**~%"
+          ;; Header + type on one line
+          (format s "**~a~a**"
                   (if pkg-name (format nil "~(~a~):" pkg-name) "")
                   (string-downcase (symbol-name sym)))
-          (format s "~%")
-          ;; Type info
           (cond
             ((fboundp sym)
              (let ((fn (symbol-function sym)))
                (cond
                  ((macro-function sym)
-                  (format s "*Macro*~%"))
+                  (format s " - *Macro*~%"))
                  ((typep fn 'generic-function)
-                  (format s "*Generic Function*~%"))
+                  (format s " - *Generic Function*~%"))
                  ((special-operator-p sym)
-                  (format s "*Special Operator*~%"))
+                  (format s " - *Special Operator*~%"))
                  (t
-                  (format s "*Function*~%")))
+                  (format s " - *Function*~%")))
                ;; Arglist
                (let ((arglist (handler-case
-                                  (sb-introspect:function-lambda-list sym)
-                                (error () nil))))
+                                   (sb-introspect:function-lambda-list sym)
+                                 (error () nil))))
                  (when arglist
-                   (format s "```lisp~%(~(~a~)~{ ~(~a~)~})~%```~%"
-                           (string-downcase (symbol-name sym))
-                           arglist)))))
+                   (format s "```lisp~%~a~%```~%"
+                           (format-arglist (symbol-name sym) arglist))))))
             ((boundp sym)
-             (format s "*Variable*~%")
-             (format s "Value: ~s~%" (symbol-value sym)))
+             (format s " - *Variable*~%")
+             (format s "`~s`~%" (symbol-value sym)))
             ((find-class sym nil)
-             (format s "*Class*~%"))
+             (format s " - *Class*~%"))
             (t
-             (format s "*Symbol*~%")))
+             (format s " - *Symbol*~%")))
           ;; Documentation
           (let ((doc (or (documentation sym 'function)
                          (documentation sym 'variable)
@@ -80,7 +123,7 @@ Returns (values symbol package) or NIL."
                          (documentation sym 'structure)
                          (documentation sym 'setf))))
             (when doc
-              (format s "~%---~%~a~%" doc))))))))
+              (format s "---~%~a" (clean-docstring doc)))))))))
 
 (defun symbol-completions (prefix &optional (limit 50))
   "Return a list of completion candidates matching PREFIX.
