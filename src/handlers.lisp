@@ -180,22 +180,28 @@
          (pos (json-get params "position"))
          (line (json-get pos "line"))
          (col (json-get pos "character"))
-         (text (document-text uri)))
-    (when text
-      (let ((prefix (symbol-at-position text line col)))
-        (when (and prefix (>= (length prefix) 2))
-          (lsp-log "Complete: ~a" prefix)
-          (let ((completions (symbol-completions prefix)))
-            (make-json-object
-             "isIncomplete" :false
-             "items" (mapcar
-                      (lambda (c)
-                        (destructuring-bind (name kind pkg) c
-                          (make-json-object
-                           "label" name
-                           "kind" kind
-                           "detail" (format nil "~(~a~)" pkg))))
-                      completions))))))))
+         (text (document-text uri))
+         (empty (make-json-object "isIncomplete" t "items" (list))))
+    (if (not text)
+        empty
+        (let ((prefix (symbol-at-position text line col)))
+          ;; Return isIncomplete:true when prefix is absent or too short so
+          ;; clients know to keep requesting on each keystroke.
+          (if (or (not prefix) (< (length prefix) 2))
+              empty
+              (progn
+                (lsp-log "Complete: ~a" prefix)
+                (let ((completions (symbol-completions prefix)))
+                  (make-json-object
+                   "isIncomplete" :false
+                   "items" (mapcar
+                            (lambda (c)
+                              (destructuring-bind (name kind pkg) c
+                                (make-json-object
+                                 "label" name
+                                 "kind" kind
+                                 "detail" (format nil "~(~a~)" pkg))))
+                            completions)))))))))
 
 ;;; --- Go to Definition ---
 
