@@ -23,4 +23,15 @@
                  (:file "dap-handlers")
                  (:file "dap-server")
                  (:file "server")
-                 (:file "main")))))
+                 (:file "main"))))
+  :in-order-to ((test-op (test-op "sextant/tests"))))
+
+(defsystem "sextant/tests"
+  :depends-on ("sextant" "fiveam")
+  :serial t
+  :components ((:module "tests"
+                :components
+                ((:file "diagnostics-test"))))
+  :perform (test-op (op c)
+             (unless (uiop:symbol-call :sextant/tests '#:run-tests)
+               (error "sextant/tests: fiveam suite reported failures"))))
