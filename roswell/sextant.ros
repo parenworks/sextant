@@ -1,0 +1,21 @@
+#!/bin/sh
+#|-*- mode:lisp -*-|#
+#|
+exec ros -Q -- $0 "$@"
+|#
+(progn
+  (ros:ensure-asdf)
+  #+quicklisp (ql:quickload :sextant :silent t))
+
+(defpackage :ros.script.sextant
+  (:use :cl))
+(in-package :ros.script.sextant)
+
+(defun main (&rest argv)
+  (declare (ignore argv))
+  ;; quickload :silent t rebinds *standard-output* for the load; transport.lisp's
+  ;; (defvar *lsp-output* *standard-output*) captures that silenced stream at load
+  ;; time, so reset both to the live stdio streams before serving.
+  (setf sextant::*lsp-input* *standard-input*
+        sextant::*lsp-output* *standard-output*)
+  (sextant:main))

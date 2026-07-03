@@ -59,6 +59,18 @@ make
 
 This produces a =sextant= executable (~16MB compressed).
 
+** Installing via Roswell
+
+If you have [[https://roswell.github.io/][Roswell]] installed:
+
+#+begin_src bash
+ros install victorzhuk/sextant
+#+end_src
+
+This builds sextant from source via ASDF/Quicklisp and installs it to
+=~/.roswell/bin= (make sure that's on your PATH). Works even before a tagged
+release exists.
+
 ** Emacs Setup (eglot)
 
 #+begin_src emacs-lisp
