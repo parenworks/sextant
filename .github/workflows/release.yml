@@ -39,10 +39,10 @@ jobs:
       - name: Resolve roswell-managed sbcl onto PATH
         run: |
           echo "$HOME/.roswell/bin" >> "$GITHUB_PATH"
-          SBCL_BIN=$("$HOME/.roswell/bin/ros" run -- --non-interactive --no-userinit \
-            --eval '(princ (sb-ext:native-namestring sb-ext:*runtime-pathname*))' --quit 2>/dev/null | tail -1)
-          [ -n "$SBCL_BIN" ] || { echo "failed to resolve sbcl binary path" >&2; exit 1; }
-          dirname "$SBCL_BIN" >> "$GITHUB_PATH"
+          ros_home="${ROSWELL_HOME:-$HOME/.roswell}"
+          sbcl_bin=$(find "$ros_home/impls" -type f -path '*/sbcl-bin/*/bin/sbcl' | sort -V | tail -1)
+          [ -n "$sbcl_bin" ] || { echo "no roswell sbcl-bin under $ros_home/impls" >&2; exit 1; }
+          dirname "$sbcl_bin" >> "$GITHUB_PATH"
 
       - name: Verify sbcl (core compression support)
         run: sbcl --non-interactive --eval '(unless (find :sb-core-compression *features*) (sb-ext:exit :code 1))'
