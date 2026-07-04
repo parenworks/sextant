@@ -5,7 +5,8 @@
                 #:captured-condition-position
                 #:captured-condition-source-form
                 #:make-diagnostic-range
-                #:json-get)
+                #:json-get
+                #:find-symbol-in-packages)
   (:export #:run-tests))
 
 (in-package :sextant/tests)

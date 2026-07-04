@@ -31,7 +31,8 @@
   :serial t
   :components ((:module "tests"
                 :components
-                ((:file "diagnostics-test"))))
+                ((:file "diagnostics-test")
+                 (:file "introspection-test"))))
   :perform (test-op (op c)
              (unless (uiop:symbol-call :sextant/tests '#:run-tests)
                (error "sextant/tests: fiveam suite reported failures"))))
