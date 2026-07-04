@@ -11,7 +11,8 @@ test:
 	sbcl --non-interactive \
 		--eval '(load (merge-pathnames "quicklisp/setup.lisp" (user-homedir-pathname)))' \
 		--eval '(push #p"./" asdf:*central-registry*)' \
-		--eval '(asdf:test-system :sextant)'
+		--eval '(ql:quickload "sextant/tests")' \
+		--eval '(asdf:test-system "sextant")'
 
 clean:
 	rm -f sextant
