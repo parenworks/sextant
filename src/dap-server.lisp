@@ -70,28 +70,52 @@ Called from the LSP server's start-server function."
     (setf *dap-output-stream* stream)
     ;; Set up the stopped callback to send DAP events
     (setf *dap-stopped-callback*
-          (lambda (condition thread)
+          (lambda (reason thread)
             (declare (ignore thread))
-            (lsp-log "DAP stopped: ~a" condition)
-            ;; Send stopped event
-            (send-dap-event "stopped"
-                            (make-json-object
-                             "reason" "exception"
-                             "description" (format nil "~a" condition)
-                             "threadId" 1
-                             "allThreadsStopped" t
-                             "text" (format nil "~a" (type-of condition))))
-            ;; Show restarts in debug console
-            (let ((restarts (get-condition-restarts)))
-              (send-dap-output "console"
-                               (format nil "~%Condition: ~a~%~%" condition))
-              (send-dap-output "console" "Available restarts:~%")
-              (dolist (r restarts)
-                (send-dap-output "console"
-                                 (format nil "  :restart ~d  [~a] ~a~%"
-                                         (getf r :index)
-                                         (getf r :name)
-                                         (getf r :description)))))))
+            (lsp-log "DAP stopped: ~a" reason)
+            (cond
+              ((eq reason :breakpoint)
+               (send-dap-event "stopped"
+                               (make-json-object
+                                "reason" "breakpoint"
+                                "description" "Breakpoint hit"
+                                "threadId" 1
+                                "allThreadsStopped" t)))
+              ((eq reason :step)
+               (send-dap-event "stopped"
+                               (make-json-object
+                                "reason" "step"
+                                "description" "Step"
+                                "threadId" 1
+                                "allThreadsStopped" t)))
+              ((eq reason :entry)
+               (send-dap-event "stopped"
+                               (make-json-object
+                                "reason" "entry"
+                                "description" "Paused on entry"
+                                "threadId" 1
+                                "allThreadsStopped" t)))
+              (t
+               ;; :exception — condition is in *dap-current-condition*
+               (let ((condition *dap-current-condition*))
+                 (send-dap-event "stopped"
+                                 (make-json-object
+                                  "reason" "exception"
+                                  "description" (format nil "~a" condition)
+                                  "threadId" 1
+                                  "allThreadsStopped" t
+                                  "text" (format nil "~a" (type-of condition))))
+                 ;; Show restarts in debug console
+                 (let ((restarts (get-condition-restarts)))
+                   (send-dap-output "console"
+                                    (format nil "~%Condition: ~a~%~%" condition))
+                   (send-dap-output "console" "Available restarts:~%")
+                   (dolist (r restarts)
+                     (send-dap-output "console"
+                                      (format nil "  :restart ~d  [~a] ~a~%"
+                                              (getf r :index)
+                                              (getf r :name)
+                                              (getf r :description)))))))))))
     (unwind-protect
         (loop
           (let ((msg (handler-case
@@ -110,4 +134,4 @@ Called from the LSP server's start-server function."
       (handler-case
           (sb-bsd-sockets:socket-close socket)
         (error () nil))
-      (lsp-log "DAP connection closed"))))
+      (lsp-log "DAP connection closed")))

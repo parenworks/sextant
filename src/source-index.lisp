@@ -355,6 +355,35 @@ Returns a list of ref-entry structs."
   (bt:with-lock-held (*index-lock*)
     (gethash (string-upcase name) *reference-index*)))
 
+(defun index-definitions-in-file (file-path)
+  "Return all definition entries whose file matches FILE-PATH.
+Entries are returned sorted by line number ascending."
+  (let ((results nil))
+    (bt:with-lock-held (*index-lock*)
+      (maphash (lambda (name entries)
+                 (declare (ignore name))
+                 (dolist (entry entries)
+                   (when (string= (index-entry-file entry) file-path)
+                     (push entry results))))
+               *definition-index*))
+    (sort results #'< :key #'index-entry-line)))
+
+(defun index-find-enclosing-definition (file-path line)
+  "Find the definition entry in FILE-PATH that encloses LINE (0-based).
+Returns the index-entry whose start line is the largest value <= LINE,
+or NIL if no definition encloses the line."
+  (let ((entries (index-definitions-in-file file-path))
+        (best nil))
+    (dolist (entry entries)
+      (when (and (<= (index-entry-line entry) line)
+                 (member (index-entry-kind entry)
+                         '(:function :macro :generic :method)))
+        ;; Pick the latest-starting definition that encloses the line
+        (when (or (null best)
+                  (> (index-entry-line entry) (index-entry-line best)))
+          (setf best entry))))
+    best))
+
 (defun index-search-symbols (query &optional (limit 100))
   "Search the index for symbols matching QUERY (substring match).
 Returns a list of index-entry structs."
