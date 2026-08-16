@@ -28,10 +28,11 @@ Returns (values symbol package) or NIL."
           (multiple-value-bind (sym status) (find-symbol uname pkg)
             (when status
               (return-from find-symbol-in-packages (values sym pkg)))))))
-    ;; Search all packages
+    ;; Search all packages. Non-exported (:internal) symbols count too, or
+    ;; project-local package functions never resolve for hover/completion.
     (dolist (pkg (list-all-packages))
       (multiple-value-bind (sym status) (find-symbol uname pkg)
-        (when (eq status :external)
+        (when status
           (return-from find-symbol-in-packages (values sym pkg)))))))
 
 (defvar *hover-max-width* 72

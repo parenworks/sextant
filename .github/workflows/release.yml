@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-14
+            platform: macos-arm64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Roswell (sbcl-bin)
+        env:
+          LISP: sbcl-bin
+        run: curl -fsSL https://raw.githubusercontent.com/roswell/roswell/master/scripts/install-for-ci.sh | sh
+
+      - name: Resolve roswell-managed sbcl onto PATH
+        run: |
+          echo "$HOME/.roswell/bin" >> "$GITHUB_PATH"
+          ros_home="${ROSWELL_HOME:-$HOME/.roswell}"
+          sbcl_bin=$(find "$ros_home/impls" -type f -path '*/sbcl-bin/*/bin/sbcl' | sort -V | tail -1)
+          [ -n "$sbcl_bin" ] || { echo "no roswell sbcl-bin under $ros_home/impls" >&2; exit 1; }
+          dirname "$sbcl_bin" >> "$GITHUB_PATH"
+
+      - name: Verify sbcl (core compression support)
+        run: sbcl --non-interactive --eval '(unless (find :sb-core-compression *features*) (sb-ext:exit :code 1))'
+
+      - name: Bootstrap Quicklisp
+        run: |
+          curl -fsSL -o /tmp/quicklisp.lisp https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive --load /tmp/quicklisp.lisp --eval '(quicklisp-quickstart:install)'
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+      - name: Smoke check
+        run: python3 ci/smoke_check.py ./sextant
+
+      - name: Rename binary for release
+        run: mv sextant sextant-${{ matrix.platform }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sextant-${{ matrix.platform }}
+          path: sextant-${{ matrix.platform }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: sextant-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/sextant-* \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --repo "$GITHUB_REPOSITORY"

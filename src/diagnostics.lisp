@@ -41,17 +41,26 @@
 ;;; --- Source location extraction from SBCL compiler internals ---
 
 #+sbcl
+(defun context-source-path (ctx)
+  "Return CTX's source-path list, trying both slot names SBCL uses depending
+on whether CTX is an IR1 node (SOURCE-PATH) or a COMPILER-ERROR-CONTEXT
+struct (PATH). Returns a list or NIL."
+  (or (and (ignore-errors (slot-boundp ctx 'sb-c::path))
+           (ignore-errors (slot-value ctx 'sb-c::path)))
+      (and (ignore-errors (slot-boundp ctx 'sb-c::source-path))
+           (ignore-errors (slot-value ctx 'sb-c::source-path)))))
+
+#+sbcl
 (defun extract-source-path-position (text)
   "Extract a precise source position from SBCL's source-path data when available.
 Source-paths are set on IR nodes and encode the exact form path.
 Returns (line . col) or NIL."
   (when (and (boundp 'sb-c::*compiler-error-context*)
              (symbol-value 'sb-c::*compiler-error-context*))
-    (let ((ctx (symbol-value 'sb-c::*compiler-error-context*)))
-      (when (ignore-errors (slot-boundp ctx 'sb-c::source-path))
-        (let ((sp (ignore-errors (slot-value ctx 'sb-c::source-path))))
-          (when (and sp (listp sp))
-            (extract-position-from-source-path sp text)))))))
+    (let* ((ctx (symbol-value 'sb-c::*compiler-error-context*))
+           (sp (context-source-path ctx)))
+      (when (and sp (listp sp))
+        (extract-position-from-source-path sp text)))))
 
 #+sbcl
 (defun extract-compiler-context-position (text)
@@ -63,10 +72,9 @@ Returns (line . col) or NIL."
     (let ((ctx (symbol-value 'sb-c::*compiler-error-context*)))
       (or
        ;; Source-path: precise sub-form position (IR nodes only)
-       (when (ignore-errors (slot-boundp ctx 'sb-c::source-path))
-         (let ((sp (ignore-errors (slot-value ctx 'sb-c::source-path))))
-           (when (and sp (listp sp))
-             (extract-position-from-source-path sp text))))
+       (let ((sp (context-source-path ctx)))
+         (when (and sp (listp sp))
+           (extract-position-from-source-path sp text)))
        ;; File-position: position after reading the enclosing top-level form.
        ;; Rough — points to the form boundary, not the exact error site.
        (when (typep ctx 'sb-c::compiler-error-context)
@@ -255,10 +263,12 @@ Returns (line . col) or NIL."
           "(?i)The (?:variable|function)\\s+([A-Z0-9*+/<>=.!?_-]+)\\s+is" msg)
        (declare (ignore match))
        (when groups (aref groups 0)))
-     ;; 'Constant "..." conflicts' - extract the function containing it
+     ;; 'Constant "..." conflicts' - the offending form is the string literal
+     ;; itself, so keep the quotes: find-symbol-position-in-text must match
+     ;; inside the string, not skip it as it would for a bare symbol name.
      (multiple-value-bind (match groups)
          (cl-ppcre:scan-to-strings
-          "(?i)Constant\\s+\"([^\"]+)\"" msg)
+          "(?i)Constant\\s+(\"[^\"]+\")" msg)
        (declare (ignore match))
        (when groups (aref groups 0))))))
 
